@@ -1,13 +1,13 @@
 package com.mentalfrostbyte.jello.gui.impl.jello.ingame.clickgui.musicplayer;
 
 import com.mentalfrostbyte.jello.gui.base.elements.impl.button.Button;
-import com.mentalfrostbyte.jello.gui.base.elements.impl.button.NanoVGButton;
 import com.mentalfrostbyte.jello.gui.base.elements.impl.button.types.ThumbnailButton;
 import com.mentalfrostbyte.jello.gui.impl.jello.buttons.ScrollableContentPanel;
 import com.mentalfrostbyte.jello.managers.util.Thumbnails;
 import com.mentalfrostbyte.jello.util.client.network.youtube.YoutubeVideoData;
 import com.mentalfrostbyte.jello.util.client.render.ResourceRegistry;
 import com.mentalfrostbyte.jello.util.client.render.theme.ColorHelper;
+import com.mentalfrostbyte.jello.gui.impl.jello.ingame.clickgui.musicplayer.elements.MusicTabButton;
 
 public class MusicInitializer implements Runnable {
     public final Thumbnails thumbnail;
@@ -28,7 +28,7 @@ public class MusicInitializer implements Runnable {
             Button var3;
             MusicPlayer.getTabs(this.musicPlayer2)
                     .addToList(
-                            var3 = new NanoVGButton(
+                            var3 = new MusicTabButton(
                                     MusicPlayer.getTabs(this.musicPlayer2),
                                     this.thumbnail.videoId,
                                     0,

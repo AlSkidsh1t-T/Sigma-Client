@@ -99,7 +99,7 @@ public class MusicPlayer extends AnimatedIconPanel {
                         this, "musiccontrols", this.width, this.getHeightA() - this.field20848,
                         this.getWidthA() - this.width, this.field20848));
 
-        ColorHelper color = new ColorHelper(1250067, -15329770).setTextColor(ClientColors.LIGHT_GREYISH_BLUE.getColor())
+        ColorHelper color = new ColorHelper(0xFF131313, -15329770).setTextColor(ClientColors.LIGHT_GREYISH_BLUE.getColor())
             .method19414(FontSizeAdjust.NEGATE_AND_DIVIDE_BY_2);
 
         // Add Open Folder Button
@@ -284,7 +284,7 @@ public class MusicPlayer extends AnimatedIconPanel {
         this.searchBox.setPageActive(true);
 
         // 添加 "搜索" 选项卡按钮，使搜索框始终可访问
-        Button searchTab = new Button(
+        Button searchTab = new MusicTabButton(
                 this.musicTabs,
                 "search_tab",
                 0,
@@ -834,7 +834,14 @@ public class MusicPlayer extends AnimatedIconPanel {
                 RenderUtil2.applyAlpha(ClientColors.DEEP_TEAL.getColor(), var4 * var1 * 0.6F));
 
         // Use NanoVG for header title (CJK safe)
-        if (NanoVGFontRenderer.isInitialized()) {
+        if (MusicPlayerTextHelper.containsNonAscii(this.field20849)) {
+            MusicPlayerTextHelper.drawTitleText(
+                    (float) ((this.width + this.getWidthA()) / 2),
+                    16.0F + (1.0F - var4) * 14.0F,
+                    this.field20849,
+                    RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(), var4)
+            );
+        } else if (NanoVGFontRenderer.isInitialized()) {
             int sw = net.minecraft.client.Minecraft.getInstance().getMainWindow().getFramebufferWidth();
             int sh = net.minecraft.client.Minecraft.getInstance().getMainWindow().getFramebufferHeight();
             float fontSize = 25.0f;
