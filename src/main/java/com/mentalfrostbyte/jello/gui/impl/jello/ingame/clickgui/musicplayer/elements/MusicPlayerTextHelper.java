@@ -86,6 +86,26 @@ public final class MusicPlayerTextHelper {
     }
 
     /**
+     * Returns tab-font text width in GUI coordinates, including HiDPI scaling.
+     */
+    public static float getTabTextWidth(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0.0F;
+        }
+
+        boolean useHiRes = (double) GuiManager.scaleFactor == 2.0;
+        float scale = useHiRes ? 1.0F / GuiManager.scaleFactor : 1.0F;
+        String cacheKey = buildCacheKey(text, 14, useHiRes);
+        CachedText cached = textCache.get(cacheKey);
+        if (cached != null) {
+            return cached.imgWidth * scale;
+        }
+
+        Font renderFont = useHiRes ? TAB_AWT_FONT_2X : TAB_AWT_FONT;
+        return measureTextWidth(renderFont, text) * scale;
+    }
+
+    /**
      * Draw the right-panel song title, using CJK-safe Java2D rendering.
      */
     public static void drawTitleText(float x, float y, String text, int color) {
@@ -107,7 +127,7 @@ public final class MusicPlayerTextHelper {
         float scale = useHiRes ? 1.0F / GuiManager.scaleFactor : 1.0F;
 
         // ── obtain or create cached texture ──
-        String cacheKey = text + "|" + fontSize + "|" + (useHiRes ? "2x" : "1x");
+        String cacheKey = buildCacheKey(text, fontSize, useHiRes);
         CachedText cached = textCache.get(cacheKey);
         if (cached == null) {
             cached = renderToTexture(renderFont, text);
@@ -173,6 +193,20 @@ public final class MusicPlayerTextHelper {
             // a GL11.glColor4f instead of being silently skipped.
             RenderSystem.clearCurrentColor();
         }
+    }
+
+    private static String buildCacheKey(String text, int fontSize, boolean useHiRes) {
+        return text + "|" + fontSize + "|" + (useHiRes ? "2x" : "1x");
+    }
+
+    private static int measureTextWidth(Font font, String text) {
+        BufferedImage measure = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D gMeasure = measure.createGraphics();
+        gMeasure.setFont(font);
+        FontMetrics fm = gMeasure.getFontMetrics();
+        int textWidth = fm.stringWidth(text);
+        gMeasure.dispose();
+        return Math.max(textWidth + 2, 1);
     }
 
     /**

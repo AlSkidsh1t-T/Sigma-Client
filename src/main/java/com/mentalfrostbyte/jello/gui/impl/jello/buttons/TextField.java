@@ -302,6 +302,8 @@ public class TextField extends AnimatedIconPanel {
                   this.startSelect = this.maxLen;
                }
          }
+
+         this.syncSelectionToCursor(false);
       }
    }
 
@@ -310,6 +312,15 @@ public class TextField extends AnimatedIconPanel {
       return InputMappings.isKeyDown(handle, GLFW.GLFW_KEY_LEFT_CONTROL)
          || InputMappings.isKeyDown(handle, GLFW.GLFW_KEY_RIGHT_CONTROL)
          || InputMappings.isKeyDown(handle, GLFW.GLFW_KEY_LEFT_SUPER);
+   }
+
+   private void syncSelectionToCursor(boolean collapseSelection) {
+      this.maxLen = Math.min(Math.max(0, this.maxLen), this.text.length());
+      if (collapseSelection) {
+         this.startSelect = this.maxLen;
+      }
+
+      this.endSelect = this.maxLen;
    }
 
    @Override
@@ -323,7 +334,9 @@ public class TextField extends AnimatedIconPanel {
          }
 
          this.maxLen++;
-         this.startSelect = this.maxLen;
+         // IME commits can deliver multiple chars in the same tick, so keep the
+         // selection state in sync immediately instead of waiting for draw/update.
+         this.syncSelectionToCursor(true);
          this.callChangeListeners();
       }
    }

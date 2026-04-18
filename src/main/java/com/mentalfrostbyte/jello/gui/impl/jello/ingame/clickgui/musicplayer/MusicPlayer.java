@@ -542,42 +542,28 @@ public class MusicPlayer extends AnimatedIconPanel {
         int duration = this.musicManager.getDurationInt();
         String timeElapsed = YoutubeUtil.parseSongTime(duration1);
         String timeTotal = YoutubeUtil.parseSongTime(duration);
-
-        if (NanoVGFontRenderer.isInitialized()) {
-            int sw = net.minecraft.client.Minecraft.getInstance().getMainWindow().getFramebufferWidth();
-            int sh = net.minecraft.client.Minecraft.getInstance().getMainWindow().getFramebufferHeight();
-            float fontSize = 14.0f;
-            int color = RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(), var1 * var1);
-            float yPos = (float) (this.getYA() + this.getHeightA() - 10) - 22.0F * var1;
-
-            NanoVGFontRenderer.beginFrame(sw, sh);
-            NanoVGFontRenderer.drawText(timeElapsed,
-                    (float) (this.getXA() + this.width + 14), yPos, fontSize, color);
-            float totalWidth = NanoVGFontRenderer.getTextWidth(timeTotal, fontSize);
-            NanoVGFontRenderer.drawText(timeTotal,
-                    (float) (this.getXA() + this.getWidthA() - 14) - totalWidth, yPos, fontSize, color);
-            NanoVGFontRenderer.endFrame();
-        } else {
-            RenderUtil.drawString(
-                    ResourceRegistry.JelloLightFont14,
-                    (float) (this.getXA() + this.width + 14),
-                    (float) (this.getYA() + this.getHeightA() - 10) - 22.0F * var1,
-                    timeElapsed,
-                    RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(), var1 * var1));
-            RenderUtil.drawString(
-                    ResourceRegistry.JelloLightFont14,
-                    (float) (this.getXA() + this.getWidthA() - 14
-                            - ResourceRegistry.JelloLightFont14.getWidth(timeTotal)),
-                    (float) (this.getYA() + this.getHeightA() - 10) - 22.0F * var1,
-                    timeTotal,
-                    RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(), var1 * var1));
-        }
+        RenderUtil.drawString(
+                ResourceRegistry.JelloLightFont14,
+                (float) (this.getXA() + this.width + 14),
+                (float) (this.getYA() + this.getHeightA() - 10) - 22.0F * var1,
+                timeElapsed,
+                RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(), var1 * var1));
+        RenderUtil.drawString(
+                ResourceRegistry.JelloLightFont14,
+                (float) (this.getXA() + this.getWidthA() - 14
+                        - ResourceRegistry.JelloLightFont14.getWidth(timeTotal)),
+                (float) (this.getYA() + this.getHeightA() - 10) - 22.0F * var1,
+                timeTotal,
+                RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(), var1 * var1));
     }
 
     private void method13193(float var1) {
         Texture var4 = this.musicManager.getNotificationImage();
         Texture var5 = this.musicManager.getSongThumbnail();
-        if (var4 != null && var5 != null) {
+        // Guard: wait until both artwork textures are fully uploaded before using dynamic artwork color.
+        if (this.musicManager.hasReadySongArtwork() && var4 != null && var5 != null) {
+            int accentColor = this.musicManager.getDynamicCoverColor();
+            int overlayColor = RenderUtil2.shiftTowardsOther(accentColor, ClientColors.DEEP_TEAL.getColor(), 0.45F);
             RenderUtil.drawImage(
                     (float) this.getXA(),
                     (float) (this.getYA() + this.getHeightA() - this.field20848),
@@ -590,13 +576,13 @@ public class MusicPlayer extends AnimatedIconPanel {
                     (float) (this.getYA() + this.getHeightA() - this.field20848),
                     (float) (this.getXA() + this.getWidthA()),
                     (float) (this.getYA() + this.getHeightA() - 5),
-                    RenderUtil2.applyAlpha(ClientColors.DEEP_TEAL.getColor(), 0.85F * var1));
+                    RenderUtil2.applyAlpha(overlayColor, 0.85F * var1));
             RenderUtil.drawRoundedRect(
                     (float) this.getXA(),
                     (float) (this.getYA() + this.getHeightA() - 5),
                     (float) (this.getXA() + this.width),
                     (float) (this.getYA() + this.getHeightA()),
-                    RenderUtil2.applyAlpha(ClientColors.DEEP_TEAL.getColor(), 0.85F * var1));
+                    RenderUtil2.applyAlpha(overlayColor, 0.85F * var1));
             RenderUtil.drawImage(
                     (float) (this.getXA() + (this.width - 114) / 2),
                     (float) (this.getYA() + this.getHeightA() - 170),
@@ -679,63 +665,54 @@ public class MusicPlayer extends AnimatedIconPanel {
         }
 
         var9 = QuadraticEasing.easeInOutQuad(var9, 0.0F, 1.0F, 1.0F);
+        boolean hasNonAscii = MusicPlayerTextHelper.containsNonAscii(text);
+        int var10 = hasNonAscii
+                ? Math.round(MusicPlayerTextHelper.getTabTextWidth(text))
+                : ResourceRegistry.JelloLightFont14.getWidth(text);
+        int var11 = Math.min(var3, var10);
+        int var12 = ResourceRegistry.JelloLightFont14.getHeight();
+        int var13 = this.getXA() + (this.width - var11) / 2;
+        int var14 = this.getYA() + this.getHeightA() - 50 + var4;
+        if (var10 <= var3) {
+            var9 = 0.0F;
+        }
 
-        if (NanoVGFontRenderer.isInitialized()) {
-            float fontSize = 14.0f;
-            int sw = net.minecraft.client.Minecraft.getInstance().getMainWindow().getFramebufferWidth();
-            int sh = net.minecraft.client.Minecraft.getInstance().getMainWindow().getFramebufferHeight();
-            float textWidth = NanoVGFontRenderer.getTextWidth(text, fontSize);
-            int var11 = Math.min(var3, (int) textWidth);
-            int var12 = (int) fontSize;
-            int var13 = this.getXA() + (this.width - var11) / 2;
-            int var14 = this.getYA() + this.getHeightA() - 50 + var4;
-            int var10 = (int) textWidth;
-
-            if (var10 <= var3) {
-                var9 = 0.0F;
-            }
-
-            RenderUtil.startScissor(var13, var14, var13 + var11, var14 + var12, true);
-            int color = RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(),
-                    var1 * var1 * Math.min(1.0F, Math.max(0.0F, 1.0F - var9 * 0.75F)));
-            NanoVGFontRenderer.beginFrame(sw, sh);
-            NanoVGFontRenderer.drawText(text, (float) var13 - (float) var10 * var9 - 50.0F * var9,
-                    (float) var14, fontSize, color);
-            if (var9 > 0.0F) {
-                NanoVGFontRenderer.drawText(text, (float) var13 - (float) var10 * var9 + (float) var10,
-                        (float) var14, fontSize,
-                        RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(), var1 * var1));
-            }
-            NanoVGFontRenderer.endFrame();
-            RenderUtil.restoreScissor();
-        } else {
-            // Fallback to original font
-            int var10 = ResourceRegistry.JelloLightFont14.getWidth(text);
-            int var11 = Math.min(var3, var10);
-            int var12 = ResourceRegistry.JelloLightFont14.getHeight();
-            int var13 = this.getXA() + (this.width - var11) / 2;
-            int var14 = this.getYA() + this.getHeightA() - 50 + var4;
-            if (var10 <= var3) {
-                var9 = 0.0F;
-            }
-            RenderUtil.startScissor(var13, var14, var13 + var11, var14 + var12, true);
-            RenderUtil.drawString(
-                    ResourceRegistry.JelloLightFont14,
-                    (float) var13 - (float) var10 * var9 - 50.0F * var9,
+        RenderUtil.startScissor(var13, var14, var13 + var11, var14 + var12, true);
+        int dimColor = RenderUtil2.applyAlpha(
+                ClientColors.LIGHT_GREYISH_BLUE.getColor(),
+                var1 * var1 * Math.min(1.0F, Math.max(0.0F, 1.0F - var9 * 0.75F))
+        );
+        float textX = (float) var13 - (float) var10 * var9 - 50.0F * var9;
+        if (hasNonAscii) {
+            MusicPlayerTextHelper.drawTabText(
+                    textX,
                     (float) var14,
                     text,
-                    RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(),
-                            var1 * var1 * Math.min(1.0F, Math.max(0.0F, 1.0F - var9 * 0.75F))));
-            if (var9 > 0.0F) {
-                RenderUtil.drawString(
-                        ResourceRegistry.JelloLightFont14,
-                        (float) var13 - (float) var10 * var9 + (float) var10,
+                    dimColor,
+                    FontSizeAdjust.field14488,
+                    FontSizeAdjust.field14488
+            );
+        } else {
+            RenderUtil.drawString(ResourceRegistry.JelloLightFont14, textX, (float) var14, text, dimColor);
+        }
+
+        if (var9 > 0.0F) {
+            int color = RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(), var1 * var1);
+            float loopTextX = (float) var13 - (float) var10 * var9 + (float) var10;
+            if (hasNonAscii) {
+                MusicPlayerTextHelper.drawTabText(
+                        loopTextX,
                         (float) var14,
                         text,
-                        RenderUtil2.applyAlpha(ClientColors.LIGHT_GREYISH_BLUE.getColor(), var1 * var1));
+                        color,
+                        FontSizeAdjust.field14488,
+                        FontSizeAdjust.field14488
+                );
+            } else {
+                RenderUtil.drawString(ResourceRegistry.JelloLightFont14, loopTextX, (float) var14, text, color);
             }
-            RenderUtil.restoreScissor();
         }
+        RenderUtil.restoreScissor();
     }
 
     private void drawLyricString(float var1, String text, int var3, int var4, int var5) {

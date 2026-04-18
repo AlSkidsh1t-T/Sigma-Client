@@ -60,9 +60,13 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class MusicManager extends Manager implements MinecraftUtil {
+    // Use a neutral pink fallback instead of green when artwork color extraction fails.
+    private static final int DEFAULT_COVER_ACCENT_COLOR = 0xFFFF85C2;
     public BufferedImage scaledThumbnail;
     public String songTitle = "";
     public List<double[]> visualizerData = new ArrayList<double[]>();
@@ -97,7 +101,11 @@ public class MusicManager extends Manager implements MinecraftUtil {
     /** Pending BufferedImage from worker thread, to be uploaded on render thread */
     private volatile BufferedImage pendingThumbnailImage = null;
     private volatile BufferedImage pendingScaledThumbnail = null;
+    private volatile Integer pendingCoverAccentColor = null;
     private volatile String pendingSongTitle = null;
+    private volatile String pendingCoverKey = null;
+    private volatile String requestedCoverKey = null;
+    private volatile int coverAccentColor = DEFAULT_COVER_ACCENT_COLOR;
 
     @Override
     public void init() {
@@ -212,8 +220,10 @@ public class MusicManager extends Manager implements MinecraftUtil {
 
     private void renderSpectrum() {
         if (!this.visualizerData.isEmpty()) {
-            if (this.notificationImage != null) {
+            // Guard: only render artwork-driven HUD effects when both textures are fully ready.
+            if (this.hasReadySongArtwork()) {
                 if (!this.amplitudes.isEmpty()) {
+                    int accentColor = this.getDynamicCoverColor();
                     float maxWidth = 114.0F;
                     float width = (float) Math.ceil((float) mc.getMainWindow().getWidth() / maxWidth);
 
@@ -226,7 +236,7 @@ public class MusicManager extends Manager implements MinecraftUtil {
                                 (float) mc.getMainWindow().getHeight() - height,
                                 width,
                                 height,
-                                RenderUtil2.applyAlpha(ClientColors.MID_GREY.getColor(), 0.2F * alphaValue));
+                                RenderUtil2.applyAlpha(accentColor, 0.2F * alphaValue));
                     }
 
                     RenderUtil.initStencilBuffer();
@@ -235,11 +245,11 @@ public class MusicManager extends Manager implements MinecraftUtil {
                         float heightRatio = (float) mc.getMainWindow().getHeight() / 1080.0F;
                         float height = ((float) (Math.sqrt(this.amplitudes.get(i)) / 12.0) - 5.0F) * heightRatio;
                         RenderUtil.drawRoundedRect2((float) i * width, (float) mc.getMainWindow().getHeight() - height,
-                                width, height, ClientColors.LIGHT_GREYISH_BLUE.getColor());
+                                width, height, RenderUtil2.applyAlpha(accentColor, 0.95F));
                     }
 
                     RenderUtil.configureStencilTest();
-                    if (this.notificationImage != null && this.songThumbnail != null) {
+                    if (this.hasReadySongArtwork()) {
                         RenderUtil.drawImage(0.0F, 0.0F, (float) mc.getMainWindow().getWidth(),
                                 (float) mc.getMainWindow().getHeight(), this.songThumbnail, 0.4F);
                         GL11.glDisable(GL11.GL_TEXTURE_2D);
@@ -360,14 +370,26 @@ public class MusicManager extends Manager implements MinecraftUtil {
         // --- Upload pending textures on the render thread (safe for OpenGL) ---
         try {
             if (this.pendingThumbnailImage != null && this.pendingScaledThumbnail != null
+                    && this.pendingCoverAccentColor != null
                     && this.currentVideo == null && !mc.isGamePaused()) {
                 // Grab pending data atomically
                 BufferedImage thumbImg = this.pendingThumbnailImage;
                 BufferedImage scaledImg = this.pendingScaledThumbnail;
+                Integer pendingAccent = this.pendingCoverAccentColor;
                 String title = this.pendingSongTitle;
+                String pendingKey = this.pendingCoverKey;
+                String expectedKey = this.requestedCoverKey;
                 this.pendingThumbnailImage = null;
                 this.pendingScaledThumbnail = null;
+                this.pendingCoverAccentColor = null;
                 this.pendingSongTitle = null;
+                this.pendingCoverKey = null;
+
+                // Drop stale worker results (old song cover) to avoid async race overwriting current song state.
+                if (pendingKey != null && expectedKey != null && !pendingKey.equals(expectedKey)) {
+                    this.processing = false;
+                    return;
+                }
 
                 // Only recreate if song actually changed
                 if (title != null && !title.equals(this.cachedTextureSongTitle)) {
@@ -403,6 +425,8 @@ public class MusicManager extends Manager implements MinecraftUtil {
 
                     this.songTitle = title;
                     this.cachedTextureSongTitle = title;
+                    // Apply extracted accent only after artwork textures were uploaded successfully.
+                    this.coverAccentColor = sanitizeAccentColor(pendingAccent);
 
                     if (this.notificationImage != null) {
                         Client.getInstance().notificationManager
@@ -428,6 +452,7 @@ public class MusicManager extends Manager implements MinecraftUtil {
             this.songThumbnail = null;
             this.notificationImage = null;
             this.cachedTextureSongTitle = null; // allow retry on next tick
+            this.coverAccentColor = DEFAULT_COVER_ACCENT_COLOR;
             this.processing = false;
         }
 
@@ -461,14 +486,243 @@ public class MusicManager extends Manager implements MinecraftUtil {
         return Integer.highestOneBit(n - 1) << 1;
     }
 
+    private static String buildCoverKey(YoutubeVideoData videoData) {
+        if (videoData == null) {
+            return "";
+        }
+        String id = videoData.videoId == null ? "" : videoData.videoId;
+        String title = videoData.title == null ? "" : videoData.title;
+        return id + "|" + title;
+    }
+
+    private static boolean isTextureReady(Texture texture) {
+        if (texture == null) {
+            return false;
+        }
+        try {
+            return texture.getTextureID() > 0 && texture.getImageWidth() > 1 && texture.getImageHeight() > 1;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    public boolean hasReadySongArtwork() {
+        return isTextureReady(this.songThumbnail) && isTextureReady(this.notificationImage);
+    }
+
+    public int getDynamicCoverColor() {
+        // Guard fallback for early frames where async artwork upload is not finished yet.
+        return this.hasReadySongArtwork() ? this.coverAccentColor : DEFAULT_COVER_ACCENT_COLOR;
+    }
+
+    private static int sanitizeAccentColor(Integer color) {
+        if (color == null) {
+            return DEFAULT_COVER_ACCENT_COLOR;
+        }
+
+        int argb = color | 0xFF000000;
+        Color awt = new Color(argb, true);
+        float[] hsb = Color.RGBtoHSB(awt.getRed(), awt.getGreen(), awt.getBlue(), null);
+        // If the picked color is too gray/too dark/too bright, use the neutral pink fallback.
+        if (hsb[1] < 0.15F || hsb[2] < 0.1F || hsb[2] > 0.95F) {
+            return DEFAULT_COVER_ACCENT_COLOR;
+        }
+        return argb;
+    }
+
+    private static BufferedImage createDefaultCoverImage() {
+        BufferedImage fallback = new BufferedImage(180, 180, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = fallback.createGraphics();
+        g.setColor(new Color(DEFAULT_COVER_ACCENT_COLOR, true));
+        g.fillRect(0, 0, fallback.getWidth(), fallback.getHeight());
+        g.dispose();
+        return fallback;
+    }
+
+    private static BufferedImage copyRegionToArgb(BufferedImage source, int x, int y, int width, int height) {
+        BufferedImage copy = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = copy.createGraphics();
+        g.drawImage(source, 0, 0, width, height, x, y, x + width, y + height, null);
+        g.dispose();
+        return copy;
+    }
+
+    private static BufferedImage normalizeCoverForSampling(BufferedImage source, String title) {
+        if (source == null || source.getWidth() <= 1 || source.getHeight() <= 1) {
+            return createDefaultCoverImage();
+        }
+
+        int width = source.getWidth();
+        int height = source.getHeight();
+        if (title != null && title.contains("[NCS Release]") && width >= 173 && height >= 173) {
+            // Keep legacy NCS crop behavior, but copy into a detached ARGB buffer.
+            return copyRegionToArgb(source, 1, 3, 170, 170);
+        }
+
+        int side = Math.min(width, height);
+        int x = Math.max(0, (width - side) / 2);
+        int y = Math.max(0, (height - side) / 2);
+        return copyRegionToArgb(source, x, y, side, side);
+    }
+
+    private static BufferedImage createBottomStripSample(BufferedImage blurredSquare) {
+        int blurH = blurredSquare.getHeight();
+        int blurW = blurredSquare.getWidth();
+        int subY = Math.min((int) (blurH * 0.75F), blurH - 1);
+        int subH = Math.max(1, Math.min((int) (blurH * 0.2F), blurH - subY));
+        return copyRegionToArgb(blurredSquare, 0, subY, blurW, subH);
+    }
+
+    private static boolean isGreenHue(float hueDegrees) {
+        return hueDegrees >= 90.0F && hueDegrees <= 150.0F;
+    }
+
+    private static int extractDominantCoverColor(BufferedImage coverImage) {
+        if (coverImage == null || coverImage.getWidth() <= 1 || coverImage.getHeight() <= 1) {
+            return DEFAULT_COVER_ACCENT_COLOR;
+        }
+
+        Map<Integer, ColorBucket> buckets = new HashMap<>();
+        int visiblePixelCount = 0;
+        int validCandidateCount = 0;
+        int greenCandidateCount = 0;
+        int width = coverImage.getWidth();
+        int height = coverImage.getHeight();
+        int step = Math.max(1, Math.min(width, height) / 64);
+
+        for (int y = 0; y < height; y += step) {
+            for (int x = 0; x < width; x += step) {
+                int argb = coverImage.getRGB(x, y);
+                int alpha = (argb >> 24) & 0xFF;
+                // Skip mostly-transparent pixels so blank fallback images do not pollute the palette.
+                if (alpha < 128) {
+                    continue;
+                }
+                visiblePixelCount++;
+
+                int r = (argb >> 16) & 0xFF;
+                int g = (argb >> 8) & 0xFF;
+                int b = argb & 0xFF;
+                float[] hsb = Color.RGBtoHSB(r, g, b, null);
+                float sat = hsb[1];
+                float bri = hsb[2];
+                float hue = hsb[0] * 360.0F;
+
+                // Filter gray/black noise before scoring. This keeps UI background and empty pixels out.
+                if (sat < 0.15F || bri < 0.08F) {
+                    continue;
+                }
+
+                validCandidateCount++;
+                if (isGreenHue(hue)) {
+                    greenCandidateCount++;
+                }
+
+                int quantizedKey = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+                ColorBucket bucket = buckets.computeIfAbsent(quantizedKey, ignored -> new ColorBucket());
+                bucket.add(r, g, b, sat, bri, hue);
+            }
+        }
+
+        // A fully transparent image means there was no usable artwork yet, so return the pink fallback directly.
+        if (visiblePixelCount <= 0) {
+            return DEFAULT_COVER_ACCENT_COLOR;
+        }
+
+        if (validCandidateCount <= 0 || buckets.isEmpty()) {
+            return DEFAULT_COVER_ACCENT_COLOR;
+        }
+
+        // Only allow green-dominant outputs when the cover itself is genuinely green-heavy.
+        boolean coverLooksGreen = greenCandidateCount >= Math.max(4, (int) (validCandidateCount * 0.35F));
+        ColorBucket best = null;
+        ColorBucket bestGreen = null;
+        for (ColorBucket bucket : buckets.values()) {
+            if (!coverLooksGreen && bucket.greenSamples > bucket.count * 0.6F) {
+                if (bestGreen == null
+                        || bucket.getAverageSaturation() > bestGreen.getAverageSaturation()
+                        || (Math.abs(bucket.getAverageSaturation() - bestGreen.getAverageSaturation()) < 1.0E-4F
+                        && bucket.count > bestGreen.count)) {
+                    bestGreen = bucket;
+                }
+                continue;
+            }
+
+            // Pick the most saturated remaining bucket first; frequency only breaks ties.
+            if (best == null
+                    || bucket.getAverageSaturation() > best.getAverageSaturation()
+                    || (Math.abs(bucket.getAverageSaturation() - best.getAverageSaturation()) < 1.0E-4F
+                    && bucket.count > best.count)
+                    || (Math.abs(bucket.getAverageSaturation() - best.getAverageSaturation()) < 1.0E-4F
+                    && bucket.count == best.count
+                    && bucket.getAverageBrightness() > best.getAverageBrightness())) {
+                best = bucket;
+            }
+        }
+
+        if (best == null) {
+            best = bestGreen;
+        }
+
+        if (best == null) {
+            return DEFAULT_COVER_ACCENT_COLOR;
+        }
+
+        return sanitizeAccentColor(best.toArgb());
+    }
+
+    private static final class ColorBucket {
+        private int count;
+        private int greenSamples;
+        private long rSum;
+        private long gSum;
+        private long bSum;
+        private float saturationSum;
+        private float brightnessSum;
+
+        private void add(int r, int g, int b, float sat, float bri, float hue) {
+            this.count++;
+            this.rSum += r;
+            this.gSum += g;
+            this.bSum += b;
+            this.saturationSum += sat;
+            this.brightnessSum += bri;
+            if (isGreenHue(hue)) {
+                this.greenSamples++;
+            }
+        }
+
+        private float getAverageSaturation() {
+            return this.count <= 0 ? 0.0F : this.saturationSum / (float) this.count;
+        }
+
+        private float getAverageBrightness() {
+            return this.count <= 0 ? 0.0F : this.brightnessSum / (float) this.count;
+        }
+
+        private int toArgb() {
+            if (this.count <= 0) {
+                return DEFAULT_COVER_ACCENT_COLOR;
+            }
+            int r = (int) Math.max(0, Math.min(255, this.rSum / this.count));
+            int g = (int) Math.max(0, Math.min(255, this.gSum / this.count));
+            int b = (int) Math.max(0, Math.min(255, this.bSum / this.count));
+            return 0xFF000000 | (r << 16) | (g << 8) | b;
+        }
+    }
+
     private void startProcessingVideoThumbnail() {
         this.startProcessingVideoThumbnail(this.currentVideo);
     }
 
     private void startProcessingVideoThumbnail(YoutubeVideoData videoData) {
-        if (videoData != null) {
+        if (videoData != null && !this.processing) {
+            // Mark processing before starting thread to prevent duplicate workers racing each other.
+            this.processing = true;
             this.visualizerData.clear();
-            new Thread(() -> this.processVideoThumbnail(videoData)).start();
+            String coverKey = buildCoverKey(videoData);
+            this.requestedCoverKey = coverKey;
+            new Thread(() -> this.processVideoThumbnail(videoData, coverKey), "MusicCoverProcessor").start();
         }
     }
 
@@ -906,8 +1160,16 @@ public class MusicManager extends Manager implements MinecraftUtil {
     }
 
     public void processVideoThumbnail(YoutubeVideoData videoData) {
+        this.processVideoThumbnail(videoData, buildCoverKey(videoData));
+    }
+
+    private void processVideoThumbnail(YoutubeVideoData videoData, String coverKey) {
         try {
-            this.processing = true;
+            if (videoData == null) {
+                this.processing = false;
+                return;
+            }
+
             BufferedImage buffImage = null;
             try {
                 buffImage = ImageIO.read(new URL(videoData.fullUrl));
@@ -916,23 +1178,28 @@ public class MusicManager extends Manager implements MinecraftUtil {
             }
 
             if (buffImage == null) {
+                // Keep original behavior for texture pipeline stability.
                 buffImage = new BufferedImage(180, 180, BufferedImage.TYPE_INT_ARGB);
             }
 
+            String title = videoData.title;
             BufferedImage blurred = ImageUtil.applyBlur(buffImage, 15);
-            // Safe subimage extraction - clamp to valid bounds
+            if (blurred == null) {
+                blurred = buffImage;
+            }
+
+            // Keep legacy sampling region for bar texture to avoid visual regressions.
             int blurH = blurred.getHeight();
             int blurW = blurred.getWidth();
             int subY = Math.min((int) (blurH * 0.75F), blurH - 1);
             int subH = Math.max(1, Math.min((int) (blurH * 0.2F), blurH - subY));
             BufferedImage thumbSub = blurred.getSubimage(0, subY, blurW, subH);
 
-            String title = videoData.title;
             int imgW = buffImage.getWidth();
             int imgH = buffImage.getHeight();
             BufferedImage scaledSub;
             if (imgH != imgW) {
-                if (title.contains("[NCS Release]") && imgW >= 173 && imgH >= 173) {
+                if (title != null && title.contains("[NCS Release]") && imgW >= 173 && imgH >= 173) {
                     scaledSub = buffImage.getSubimage(1, 3, 170, 170);
                 } else {
                     int cropW = Math.min(imgW, 180);
@@ -943,10 +1210,22 @@ public class MusicManager extends Manager implements MinecraftUtil {
                 scaledSub = buffImage;
             }
 
+            // Analyze a detached ARGB copy to avoid getSubimage raster side effects.
+            BufferedImage sampledCover = ensureSafeTexture(scaledSub);
+            int extractedAccent = extractDominantCoverColor(sampledCover);
+
+            // Async guard: do not let stale worker results override a newer song's artwork/color.
+            if (!coverKey.equals(this.requestedCoverKey)) {
+                this.processing = false;
+                return;
+            }
+
             // Store results for the render thread to pick up (no GL calls here!)
-            this.pendingThumbnailImage = thumbSub;
-            this.pendingScaledThumbnail = scaledSub;
+            this.pendingThumbnailImage = ensureSafeTexture(thumbSub);
+            this.pendingScaledThumbnail = sampledCover;
+            this.pendingCoverAccentColor = extractedAccent;
             this.pendingSongTitle = title;
+            this.pendingCoverKey = coverKey;
             this.currentVideo = null;
         } catch (Exception var5) {
             var5.printStackTrace();
