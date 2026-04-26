@@ -31,6 +31,7 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.math.vector.Vector3d;
 import org.lwjgl.glfw.GLFW;
 import team.sdhq.eventBus.annotations.EventTarget;
+import team.sdhq.eventBus.annotations.priority.HighestPriority;
 import team.sdhq.eventBus.annotations.priority.LowerPriority;
 
 import java.util.Iterator;
@@ -72,7 +73,7 @@ public class AutoMLG extends Module {
     }
 
     @EventTarget
-    @LowerPriority
+    @HighestPriority
     public void onUpdate(EventTick var1) {
         if (this.isEnabled() && mc.playerController.gameIsSurvivalOrAdventure()) {
             if (/*var1.isPre() && */preTicks >= 0) {
