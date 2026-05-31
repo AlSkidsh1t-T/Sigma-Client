@@ -3,13 +3,15 @@ package com.elfmcys.yesstevemodel.client.animation.controller;
 import com.elfmcys.yesstevemodel.YesSteveModel;
 import com.elfmcys.yesstevemodel.client.animation.OpenYsmAnimationSet;
 import com.elfmcys.yesstevemodel.client.animation.PlayerStateSnapshot;
+import com.elfmcys.yesstevemodel.client.animation.molang.MolangContext;
+import com.elfmcys.yesstevemodel.client.animation.molang.MolangEvaluator;
+import com.elfmcys.yesstevemodel.client.animation.molang.MolangExpression;
+import com.elfmcys.yesstevemodel.client.animation.molang.MolangParser;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -106,56 +108,35 @@ public final class OpenYsmControllerRuntime {
     }
 
     private static boolean evaluateCondition(String expression, PlayerStateSnapshot snapshot, String controllerName, String targetState) {
-        EvaluationResult result = evaluateSimple(expression, snapshot);
+        if (expression == null || expression.trim().isEmpty()) {
+            return false;
+        }
+        EvaluationResult result = evaluateMolang(expression, snapshot, controllerName, "transition", targetState);
         if (!result.valid) {
-            debugExpressionFailure(snapshot, controllerName, expression, "transition", targetState);
             return false;
         }
         return result.value != 0.0F;
     }
 
     private static float evaluateWeight(String expression, PlayerStateSnapshot snapshot, String controllerName, String animationName) {
-        EvaluationResult result = evaluateSimple(expression, snapshot);
+        EvaluationResult result = evaluateMolang(expression == null || expression.trim().isEmpty() ? "1" : expression,
+                snapshot, controllerName, "weight", animationName);
         if (!result.valid) {
-            debugExpressionFailure(snapshot, controllerName, expression, "weight", animationName);
             return 0.0F;
         }
         return Math.max(0.0F, result.value);
     }
 
-    private static EvaluationResult evaluateSimple(String expression, PlayerStateSnapshot snapshot) {
-        if (expression == null || expression.trim().isEmpty()) {
-            return EvaluationResult.valid(1.0F);
-        }
-        String value = expression.trim().toLowerCase(Locale.ROOT);
-        if ("true".equals(value)) {
-            return EvaluationResult.valid(1.0F);
-        }
-        if ("false".equals(value)) {
-            return EvaluationResult.valid(0.0F);
-        }
-        if (value.startsWith("ctrl.")) {
-            return EvaluationResult.valid(ctrlValue(value.substring("ctrl.".length()), snapshot));
-        }
+    private static EvaluationResult evaluateMolang(String expression, PlayerStateSnapshot snapshot, String controllerName,
+                                                   String expressionKind, String owner) {
         try {
-            return EvaluationResult.valid(Float.parseFloat(value));
-        } catch (NumberFormatException exception) {
+            MolangExpression parsed = MolangParser.parse(expression);
+            MolangContext context = MolangContext.controller(snapshot, "", controllerName);
+            return EvaluationResult.valid((float) MolangEvaluator.evaluate(parsed, context).asDouble());
+        } catch (MolangParser.ParseException exception) {
+            debugExpressionFailure(snapshot, controllerName, expression, expressionKind, owner, exception.getMessage());
             return EvaluationResult.invalid();
         }
-    }
-
-    private static float ctrlValue(String key, PlayerStateSnapshot snapshot) {
-        return switch (key) {
-            case "idle" -> snapshot.isMoving() ? 0.0F : 1.0F;
-            case "walk", "moving" -> snapshot.isMoving() && !snapshot.sprinting && !snapshot.sneaking ? 1.0F : 0.0F;
-            case "run", "sprint", "sprinting" -> snapshot.sprinting && snapshot.isMoving() ? 1.0F : 0.0F;
-            case "sneak", "sneaking" -> snapshot.sneaking ? 1.0F : 0.0F;
-            case "use", "using_item" -> snapshot.usingItem ? 1.0F : 0.0F;
-            case "swing", "swinging" -> snapshot.swingInProgress ? 1.0F : 0.0F;
-            case "hold_mainhand" -> snapshot.mainhandEmpty ? 0.0F : 1.0F;
-            case "hold_offhand" -> snapshot.offhandEmpty ? 0.0F : 1.0F;
-            default -> 0.0F;
-        };
     }
 
     private static void debugTransition(PlayerStateSnapshot snapshot, String modelId, ControllerDefinition definition,
@@ -188,12 +169,12 @@ public final class OpenYsmControllerRuntime {
     }
 
     private static void debugExpressionFailure(PlayerStateSnapshot snapshot, String controllerName, String expression,
-                                               String expressionKind, String owner) {
+                                               String expressionKind, String owner, String reason) {
         if (!isDebugEnabled()) {
             return;
         }
-        YesSteveModel.LOGGER.info("[DEBUG-animation-state] player={} controller={} expression parse errors kind={} owner={} expression={}",
-                snapshot.uuid, controllerName, expressionKind, owner, expression);
+        YesSteveModel.LOGGER.info("[DEBUG-animation-state] player={} controller={} expression parse errors kind={} owner={} expression={} reason={}",
+                snapshot.uuid, controllerName, expressionKind, owner, expression, reason);
     }
 
     private static boolean isDebugEnabled() {
